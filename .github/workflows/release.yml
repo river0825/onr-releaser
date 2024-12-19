@@ -6,6 +6,10 @@ on:
       sprint_number:
         description: "Sprint number for this release"
         required: true
+        default: 1
+  push:
+    branches:
+      - '**'
 
 jobs:
   determine_state:
