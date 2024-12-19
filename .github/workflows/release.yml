@@ -1,0 +1,129 @@
+name: Combined Release Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      sprint_number:
+        description: "Sprint number for this release"
+        required: true
+      source_branch:
+        description: "Source branch (e.g., master or develop)"
+        required: true
+        default: "master"
+
+jobs:
+  determine_state:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up environment variables
+        run: |
+          echo "SPRINT_NUMBER=${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
+          echo "SOURCE_BRANCH=${{ github.event.inputs.source_branch }}" >> $GITHUB_ENV
+          echo "RELEASE_BRANCH=release-v2.${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
+      
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Check if release branch exists
+        id: check_branch
+        run: |
+          set -e
+          if git ls-remote --heads origin $RELEASE_BRANCH; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+    outputs:
+      branch_exists: ${{ steps.check_branch.outputs.exists }}
+
+  initial_release:
+    if: ${{ needs.determine_state.outputs.branch_exists == 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load env
+        run: |
+          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
+          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}"
+          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
+      
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Verify no new code since last release
+        id: check_commits
+        run: |
+          # Fetch all tags
+          git fetch --tags
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1`)
+          echo "Latest tag found: $LATEST_TAG"
+          # Compare commits since LATEST_TAG
+          COMMITS_SINCE=$(git rev-list $LATEST_TAG..$SOURCE_BRANCH --count)
+          echo "COMMITS_SINCE=$COMMITS_SINCE" >> $GITHUB_OUTPUT
+
+      - name: Create release branch if no new code
+        if: ${{ steps.check_commits.outputs.COMMITS_SINCE == '0' }}
+        run: |
+          git checkout $SOURCE_BRANCH
+          git checkout -b $RELEASE_BRANCH
+          git push origin $RELEASE_BRANCH
+
+      - name: Fail if there is new code
+        if: ${{ steps.check_commits.outputs.COMMITS_SINCE != '0' }}
+        run: |
+          echo "New commits detected. This script assumes stable source branch. Exiting."
+          exit 1
+
+      - name: Create RC Tag and Release
+        if: ${{ steps.check_commits.outputs.COMMITS_SINCE == '0' }}
+        run: |
+          RC_TAG="v2.${SPRINT_NUMBER}.0-rc"
+          git tag $RC_TAG $RELEASE_BRANCH
+          git push origin $RC_TAG
+          # Create GitHub Release
+          gh release create $RC_TAG --title "v2.${SPRINT_NUMBER} RC Release" --notes "Initial RC for sprint ${SPRINT_NUMBER}"
+
+  production_release:
+    if: ${{ needs.determine_state.outputs.branch_exists == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    # The environment 'production' should be protected so that it requires approval.
+    steps:
+      - name: Set up env
+        run: |
+          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
+          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
+
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Determine next production tag
+        id: next_tag
+        run: |
+          # Find the highest existing production tag for this sprint
+          # Production tags look like v2.<sprint_number>.<x> (no -rc)
+          SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}
+          EXISTING_TAGS=$(git tag --list "v2.${SPRINT_NUMBER}.*" | grep -v -rc || true)
+          if [ -z "$EXISTING_TAGS" ]; then
+            NEXT_TAG="v2.${SPRINT_NUMBER}.0"
+          else
+            # Get highest minor number
+            HIGHEST=$(echo "$EXISTING_TAGS" | sed 's/v2\.'$SPRINT_NUMBER'\.\([0-9]*\)/\1/g' | sort -n | tail -1)
+            NEXT=$((HIGHEST+1))
+            NEXT_TAG="v2.${SPRINT_NUMBER}.${NEXT}"
+          fi
+          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_OUTPUT
+
+      - name: Create Production Tag and Release
+        run: |
+          NEXT_TAG="${{ steps.next_tag.outputs.NEXT_TAG }}"
+          RELEASE_BRANCH="release-v2.${{ env.SPRINT_NUMBER }}"
+          git tag $NEXT_TAG $RELEASE_BRANCH
+          git push origin $NEXT_TAG
+          gh release create $NEXT_TAG --title "v2.${{ env.SPRINT_NUMBER}} Production Release" --notes "Production release for sprint ${{ env.SPRINT_NUMBER }}"
+
+      - name: Notify Stakeholders
+        run: |
+          echo "Production release created: $NEXT_TAG"
+          # Add your notification logic here (e.g., Slack API, email, etc.)
