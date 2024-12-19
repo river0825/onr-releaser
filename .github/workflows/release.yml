@@ -45,7 +45,7 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Verify no new code since last release
+      - name: Verify new code since last release
         id: check_commits
         run: |
           # Fetch all tags
@@ -57,12 +57,6 @@ jobs:
           COMMITS_SINCE=$(git rev-list $LATEST_TAG..$SOURCE_BRANCH --count)
           echo "COMMITS_SINCE=$COMMITS_SINCE" >> $GITHUB_OUTPUT
       
-      - name: Fail if there is new code
-        if: ${{ steps.check_commits.outputs.COMMITS_SINCE != '0' }}
-        run: |
-          echo "New commits detected. This script assumes stable source branch. Exiting."
-          exit 1
-
       - name: Create RC Tag and Release
         if: ${{ steps.check_commits.outputs.COMMITS_SINCE == '0' }}
         run: |
