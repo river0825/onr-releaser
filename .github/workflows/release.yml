@@ -28,8 +28,9 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
-    outputs:
-      branch_exists: ${{ steps.check_branch.outputs.exists }}
+          echo "Branch exists: $(cat $GITHUB_OUTPUT)"
+      outputs:
+        branch_exists: ${{ steps.check_branch.outputs.exists }}
 
   initial_release:
     if: ${{ needs.determine_state.outputs.branch_exists == 'true' }}
