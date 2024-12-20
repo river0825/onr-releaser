@@ -63,7 +63,7 @@ jobs:
               echo "release_tag=${new_rc_version}" >> $GITHUB_OUTPUT
             fi
 
-          elif [ -n "$rc_tag_match" ] && [ -z "$prod_tag_match" ]; then
+          elif [ -n "$tag_on_latest_commit_in_release_branch" ] && [ -z "$prod_tag_match" ]; then
             # RC tag exists but no production tag - Production release
             echo "release_type=production_release" >> $GITHUB_OUTPUT
 
