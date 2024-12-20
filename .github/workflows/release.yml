@@ -12,55 +12,68 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_type: ${{ steps.check_type.outputs.release_type }}
+      release_tag: ${{ steps.check_type.outputs.release_tag }}
+      release_branch: ${{ steps.check_type.outputs.release_branch }}
+      rc_tag_match: ${{ steps.check_type.outputs.rc_tag_match }}
     steps:
       - name: Set up environment variables
         run: |
           echo "SPRINT_NUMBER=${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
           echo "SOURCE_BRANCH=${{ github.ref }}" >> $GITHUB_ENV
           echo "RELEASE_BRANCH=release-v2.${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
-      
+
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Fetch all history for all tags and branches
+          fetch-depth: 0 # Fetch all history for all tags and branches
 
       - name: Determine release type
         id: check_type
         run: |
           set -e
           folder="."
-          
+
           # Get latest commit and tags
-          latest_commit=$(git -C "$folder" rev-parse HEAD)
-          latest_tag=$(git -C "$folder" describe --tags --exact-match "$latest_commit" 2>/dev/null || echo "")
-          
+          latest_commit=$(git rev-parse HEAD)
+          latest_tag=$(git describe --tags --exact-match "$latest_commit" 2>/dev/null || echo "")
+
           # Check for RC and production tags for current sprint
-          rc_tag_match=$(git -C "$folder" tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*-rc" || echo "")
-          prod_tag_match=$(git -C "$folder" tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
-          
+          rc_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*-rc" || echo "")
+          prod_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
+
           # Check release branch status
-          latest_commit_in_release_branch=$(git -C "$folder" rev-parse --verify "${{ env.RELEASE_BRANCH }}" 2>/dev/null || echo "")
-          tag_on_latest_commit_in_release_branch=$(git -C "$folder" describe --tags --exact-match "$latest_commit_in_release_branch" 2>/dev/null || echo "")
+          latest_commit_in_release_branch=$(git rev-parse --verify "${{ env.RELEASE_BRANCH }}" 2>/dev/null || echo "")
+          tag_on_latest_commit_in_release_branch=$(git describe --tags --exact-match "$latest_commit_in_release_branch" 2>/dev/null || echo "")
 
           # Determine release type based on conditions
           if [ -n "$latest_commit_in_release_branch" ] && [ -z "$tag_on_latest_commit_in_release_branch" ]; then
             # Release branch exists and has untagged commits - New RC release
             echo "release_type=new_rc_release" >> $GITHUB_OUTPUT
-          elif [ -n "$rc_tag_match" ] && [ -z "$prod_tag_match" ]; then
+
+            # ----- determine release tag -----
+            # determine release tag, if there are no tags in the release branch, then it is the first RC
+            if [ -z "$rc_tag_match" ]; then
+              echo "release_tag=v2.${{ env.SPRINT_NUMBER }}.0-rc" >> $GITHUB_OUTPUT
+            else
+              IFS='.' read -r major minor patch <<< "${rc_tag_match#v}"  # Extract major, minor, and patch versions
+              patch=${patch%%-*}  # Remove any suffix from minor version
+              new_patch=$((patch + 1))  # Increment the minor version
+              new_rc_version="${major}.${minor}.${new_patch}-rc"  # Construct the new RC version
+
+              echo "release_tag=${new_rc_version}" >> $GITHUB_OUTPUT
+            fi
+
+          elif [ -n "$tag_on_latest_commit_in_release_branch" ] && [ -z "$prod_tag_match" ]; then
             # RC tag exists but no production tag - Production release
             echo "release_type=production_release" >> $GITHUB_OUTPUT
-          elif [ -n "$rc_tag_match" ] && [ -n "$prod_tag_match" ]; then
-            latest_rc=$(echo "$rc_tag_match" | sort -V | tail -n1)
-            latest_prod=$(echo "$prod_tag_match" | sort -V | tail -n1)
-            if [ "$latest_rc" \> "$latest_prod" ]; then
-              # Latest RC is newer than latest production - Production release
-              echo "release_type=production_release" >> $GITHUB_OUTPUT
-            else
-              echo "release_type=no_new_code" >> $GITHUB_OUTPUT
-            fi
+
+            # ----- determine release tag -----
+            echo "release_tag=${tag_on_latest_commit_in_release_branch%-rc}" >> $GITHUB_OUTPUT
           else
             echo "release_type=no_new_code" >> $GITHUB_OUTPUT
           fi
+
+          echo "release_branch=${{ env.RELEASE_BRANCH }}" >> $GITHUB_OUTPUT
 
           # Debug output
           echo "Latest commit: $latest_commit"
@@ -70,7 +83,6 @@ jobs:
           echo "Release branch commit: $latest_commit_in_release_branch"
           echo "Tags on release branch: $tag_on_latest_commit_in_release_branch"
           echo "Determined release type: $(cat $GITHUB_OUTPUT | grep release_type | cut -d= -f2)"
-
   rc_release:
     needs: determine_state
     if: ${{ needs.determine_state.outputs.release_type == 'new_rc_release' }}
@@ -78,11 +90,10 @@ jobs:
     steps:
       - name: Load env
         run: |
-          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
-          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}"
-          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
           echo "release_type=${{ needs.determine_state.outputs.release_type }}"
-      
+          echo "release_tag=${{ needs.determine_state.outputs.release_tag }}"
+          echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
+
       - name: Checkout Repo
         uses: actions/checkout@v3
 
@@ -92,30 +103,8 @@ jobs:
           git tag $RC_TAG $RELEASE_BRANCH
           git push origin $RC_TAG
           # Create GitHub Release
-          gh release create $RC_TAG --title "v2.${SPRINT_NUMBER} RC Release" --notes "Initial RC for sprint ${SPRINT_NUMBER}"
 
-  minor_rc_release:
-    needs: determine_state
-    if: ${{ needs.determine_state.outputs.release_type == 'minor_rc_release' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Load env
-        run: |
-          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
-          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}"
-          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
-          echo "release_type=${{ needs.determine_state.outputs.release_type }}"
-      
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-
-      - name: Create Minor RC Tag and Release
-        run: |
-          MINOR_RC_TAG="v2.${SPRINT_NUMBER}.1-rc"
-          git tag $MINOR_RC_TAG $RELEASE_BRANCH
-          git push origin $MINOR_RC_TAG
-          # Create GitHub Release
-          gh release create $MINOR_RC_TAG --title "v2.${SPRINT_NUMBER} Minor RC Release" --notes "Minor RC for sprint ${SPRINT_NUMBER}"
+          gh release create ${release_tag} --target ${release_branch} -t "${release_tag}" -d -p --generate-notes
 
   production_release:
     needs: determine_state
@@ -124,37 +113,19 @@ jobs:
     environment: production
     # The environment 'production' should be protected so that it requires approval.
     steps:
-      - name: Set up env
+      - name: Load env
         run: |
-          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
-          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
           echo "release_type=${{ needs.determine_state.outputs.release_type }}"
+          echo "release_tag=${{ needs.determine_state.outputs.release_tag }}"
+          echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
+
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Determine next production tag
-        id: next_tag
-        run: |
-          # Find the highest existing production tag for this sprint
-          # Production tags look like v2.<sprint_number>.<x> (no -rc)
-          SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}
-          EXISTING_TAGS=$(git tag --list "v2.${SPRINT_NUMBER}.*" | grep -v -rc || true)
-          if [ -z "$EXISTING_TAGS" ]; then
-            NEXT_TAG="v2.${SPRINT_NUMBER}.0"
-          else
-            # Get highest minor number
-            HIGHEST=$(echo "$EXISTING_TAGS" | sed 's/v2\.'$SPRINT_NUMBER'\.\([0-9]*\)/\1/g' | sort -n | tail -1)
-            NEXT=$((HIGHEST+1))
-            NEXT_TAG="v2.${SPRINT_NUMBER}.${NEXT}"
-          fi
-          echo "NEXT_TAG=$NEXT_TAG" >> $GITHUB_OUTPUT
       - name: Create Production Tag and Release
         run: |
-          NEXT_TAG="${{ steps.next_tag.outputs.NEXT_TAG }}"
-          RELEASE_BRANCH="release-v2.${{ env.SPRINT_NUMBER }}"
-          git tag $NEXT_TAG $RELEASE_BRANCH
-          git push origin $NEXT_TAG
-          gh release create $NEXT_TAG --title "v2.${{ env.SPRINT_NUMBER}} Production Release" --notes "Production release for sprint ${{ env.SPRINT_NUMBER }}"
+          gh release create ${release_tag} --target ${release_branch} -t "${new_version}" -d --latest --generate-notes
+
       - name: Notify Stakeholders
         run: |
           echo "Production release created: $NEXT_TAG"
