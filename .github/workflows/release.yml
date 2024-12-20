@@ -7,6 +7,11 @@ on:
         description: "Sprint number for this release"
         required: true
 
+      major:
+        description: "Major version number"
+        required: true
+        default: "v2"
+
 jobs:
   determine_state:
     runs-on: ubuntu-latest
@@ -20,7 +25,8 @@ jobs:
         run: |
           echo "SPRINT_NUMBER=${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
           echo "SOURCE_BRANCH=${{ github.ref }}" >> $GITHUB_ENV
-          echo "RELEASE_BRANCH=release-v2.${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
+          echo "RELEASE_BRANCH=release-${{ github.event.inputs.major }}.${{ github.event.inputs.sprint_number }}" >> $GITHUB_ENV
+          echo "MAJOR=${{ github.event.inputs.major }}" >> $GITHUB_ENV
 
       - name: Checkout Repo
         uses: actions/checkout@v3
@@ -33,22 +39,24 @@ jobs:
           set -e
           folder="."
 
+          MAJOR="${{ env.MAJOR }}"
+
           # Get latest commit and tags
           latest_commit=$(git rev-parse HEAD)
           latest_tag=$(git describe --tags --exact-match "$latest_commit" 2>/dev/null || echo "")
 
           # # Check for RC and production tags for current sprint
-          # rc_tag_match=$(git tag --list 'v2.${{ env.SPRINT_NUMBER }}.*-rc' --sort=-v:refname | head -n1)
-          # prod_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
+          # rc_tag_match=$(git tag --list '${{ env.MAJOR }}.${{ env.SPRINT_NUMBER }}.*-rc' --sort=-v:refname | head -n1)
+          # prod_tag_match=$(git tag | grep -E "${{ env.MAJOR }}\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
 
           # # Get latest tag of any type for sprint
-          # latest_tag=$(git tag --list "v2.${SPRINT_NUMBER}.*" | sort -V | tail -n1)
+          # latest_tag=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*" | sort -V | tail -n1)
 
           # Get latest RC tag for sprint
-          rc_tag_match=$(git tag --list "v2.${SPRINT_NUMBER}.*-rc" | sort -V | tail -n1)
+          rc_tag_match=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*-rc" --sort=v:refname | tail -n1)
 
           # Get latest production tag for sprint
-          prod_tag_match=$(git tag --list "v2.${SPRINT_NUMBER}.*" | grep -v -rc | sort -V | tail -n1)
+          prod_tag_match=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*" | grep -v -rc | sort -V | tail -n1)
 
 
           # Check release branch status
@@ -63,7 +71,7 @@ jobs:
             # ----- determine release tag -----
             # determine release tag, if there are no tags in the release branch, then it is the first RC
             if [ -z "$rc_tag_match" ]; then
-              echo "release_tag=v2.${{ env.SPRINT_NUMBER }}.0-rc" >> $GITHUB_OUTPUT
+              echo "release_tag=${{ env.MAJOR }}.${{ env.SPRINT_NUMBER }}.0-rc" >> $GITHUB_OUTPUT
             else
               IFS='.' read -r major minor patch <<< "${rc_tag_match#v}"  # Extract major, minor, and patch versions
               patch=${patch%%-*}  # Remove any suffix from minor version
@@ -135,3 +143,21 @@ jobs:
         run: |
           echo "Production release created: $NEXT_TAG"
           # Add your notification logic here (e.g., Slack API, email, etc.)
+
+  no_new_code:
+    needs: determine_state
+    if: ${{ needs.determine_state.outputs.release_type == 'no_new_code' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load env
+        run: |
+          echo "release_type=${{ needs.determine_state.outputs.release_type }}"
+          echo "release_tag=${{ needs.determine_state.outputs.release_tag }}"
+          echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
+
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Notify Stakeholders
+        run: |
+          echo "No new code to release"
