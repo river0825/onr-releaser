@@ -68,8 +68,7 @@ jobs:
             echo "release_type=production_release" >> $GITHUB_OUTPUT
 
             # ----- determine release tag -----
-            echo "release_tag=${latest_rc_version%-rc}" >> $GITHUB_OUTPUT
-            echo "rc_tag_match=${rc_tag_match}" >> $GITHUB_OUTPUT
+            echo "release_tag=${tag_on_latest_commit_in_release_branch%-rc}" >> $GITHUB_OUTPUT
           else
             echo "release_type=no_new_code" >> $GITHUB_OUTPUT
           fi
@@ -91,9 +90,6 @@ jobs:
     steps:
       - name: Load env
         run: |
-          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
-          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}"
-          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
           echo "release_type=${{ needs.determine_state.outputs.release_type }}"
           echo "release_tag=${{ needs.determine_state.outputs.release_tag }}"
           echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
@@ -119,9 +115,6 @@ jobs:
     steps:
       - name: Load env
         run: |
-          echo "SPRINT_NUMBER=${{ env.SPRINT_NUMBER }}"
-          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}"
-          echo "RELEASE_BRANCH=${{ env.RELEASE_BRANCH }}"
           echo "release_type=${{ needs.determine_state.outputs.release_type }}"
           echo "release_tag=${{ needs.determine_state.outputs.release_tag }}"
           echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
