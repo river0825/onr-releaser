@@ -37,9 +37,19 @@ jobs:
           latest_commit=$(git rev-parse HEAD)
           latest_tag=$(git describe --tags --exact-match "$latest_commit" 2>/dev/null || echo "")
 
-          # Check for RC and production tags for current sprint
-          rc_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*-rc" || echo "")
-          prod_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
+          # # Check for RC and production tags for current sprint
+          # rc_tag_match=$(git tag --list 'v2.${{ env.SPRINT_NUMBER }}.*-rc' --sort=-v:refname | head -n1)
+          # prod_tag_match=$(git tag | grep -E "v2\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
+
+          # # Get latest tag of any type for sprint
+          # latest_tag=$(git tag --list "v2.${SPRINT_NUMBER}.*" | sort -V | tail -n1)
+
+          # Get latest RC tag for sprint
+          rc_tag_match=$(git tag --list "v2.${SPRINT_NUMBER}.*-rc" | sort -V | tail -n1)
+
+          # Get latest production tag for sprint
+          prod_tag_match=$(git tag --list "v2.${SPRINT_NUMBER}.*" | grep -v -rc | sort -V | tail -n1)
+
 
           # Check release branch status
           latest_commit_in_release_branch=$(git rev-parse --verify "${{ env.RELEASE_BRANCH }}" 2>/dev/null || echo "")
@@ -99,11 +109,6 @@ jobs:
 
       - name: Create RC Tag and Release
         run: |
-          RC_TAG="v2.${SPRINT_NUMBER}.0-rc"
-          git tag $RC_TAG $RELEASE_BRANCH
-          git push origin $RC_TAG
-          # Create GitHub Release
-
           gh release create ${release_tag} --target ${release_branch} -t "${release_tag}" -d -p --generate-notes
 
   production_release:
