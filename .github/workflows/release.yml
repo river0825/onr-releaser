@@ -1,17 +1,25 @@
 name: Combined Release Workflow
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: write
+  checks: write
+  deployments: write
+  statuses: write
+
 on:
   workflow_dispatch:
     inputs:
       sprint_number:
-        description: "Sprint number for this release"
+        description: Sprint number for this release
         required: true
 
       major:
-        description: "Major version number"
+        description: Major version number
         required: true
-        default: "v2"
-
+        default: v2
 jobs:
   determine_state:
     runs-on: ubuntu-latest
@@ -29,7 +37,7 @@ jobs:
           echo "MAJOR=${{ github.event.inputs.major }}" >> $GITHUB_ENV
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Fetch all history for all tags and branches
 
@@ -40,24 +48,15 @@ jobs:
           folder="."
 
           MAJOR="${{ env.MAJOR }}"
-
-          # Get latest commit and tags
-          latest_commit=$(git rev-parse HEAD)
-          latest_tag=$(git describe --tags --exact-match "$latest_commit" 2>/dev/null || echo "")
-
-          # # Check for RC and production tags for current sprint
-          # rc_tag_match=$(git tag --list '${{ env.MAJOR }}.${{ env.SPRINT_NUMBER }}.*-rc' --sort=-v:refname | head -n1)
-          # prod_tag_match=$(git tag | grep -E "${{ env.MAJOR }}\.${{ env.SPRINT_NUMBER }}\.\d*$" || echo "")
-
-          # # Get latest tag of any type for sprint
-          # latest_tag=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*" | sort -V | tail -n1)
+          RELEASE_BRANCH="release-${MAJOR}.${SPRINT_NUMBER}"
 
           # Get latest RC tag for sprint
           rc_tag_match=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*-rc" --sort=v:refname | tail -n1)
 
           # Get latest production tag for sprint
-          prod_tag_match=$(git tag --list "${{ env.MAJOR }}.${SPRINT_NUMBER}.*" | grep -v -rc | sort -V | tail -n1)
-
+          if [ -n "$rc_tag_match" ]; then
+            prod_tag_match=$(git tag --list "${rc_tag_match%-rc}" --sort=v:refname | grep -v "rc" | tail -n1)
+          fi
 
           # Check release branch status
           latest_commit_in_release_branch=$(git rev-parse --verify "${{ env.RELEASE_BRANCH }}" 2>/dev/null || echo "")
@@ -94,8 +93,10 @@ jobs:
           echo "release_branch=${{ env.RELEASE_BRANCH }}" >> $GITHUB_OUTPUT
 
           # Debug output
-          echo "Latest commit: $latest_commit"
-          echo "Latest tag: $latest_tag"
+          echo "Release branch: $RELEASE_BRANCH"
+          echo "Latest commit in release branch: $latest_commit_in_release_branch"
+          echo "Tag on latest commit in release branch: $tag_on_latest_commit_in_release_branch"
+
           echo "RC tags: $rc_tag_match"
           echo "Production tags: $prod_tag_match"
           echo "Release branch commit: $latest_commit_in_release_branch"
@@ -113,7 +114,7 @@ jobs:
           echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Create RC Tag and Release
         run: |
@@ -123,8 +124,6 @@ jobs:
     needs: determine_state
     if: ${{ needs.determine_state.outputs.release_type == 'production_release' }}
     runs-on: ubuntu-latest
-    environment: production
-    # The environment 'production' should be protected so that it requires approval.
     steps:
       - name: Load env
         run: |
@@ -133,7 +132,7 @@ jobs:
           echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Create Production Tag and Release
         run: |
@@ -156,7 +155,7 @@ jobs:
           echo "release_branch=${{ needs.determine_state.outputs.release_branch }}"
 
       - name: Checkout Repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Notify Stakeholders
         run: |
