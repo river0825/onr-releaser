@@ -1,0 +1,104 @@
+name: 'Release Action'
+description: 'Automated release management for RC, Production, and Minor RC releases'
+
+inputs:
+  sprint_number:
+    description: 'Sprint number for this release'
+    required: true
+  major:
+    description: 'Major version number'
+    required: false
+    default: 'v2'
+  github_token:
+    description: 'GitHub token for creating releases'
+    required: true
+
+outputs:
+  release_type:
+    description: 'Type of release determined (new_rc_release, production_release, or no_new_code)'
+    value: ${{ steps.check_type.outputs.release_type }}
+  release_tag:
+    description: 'Generated release tag'
+    value: ${{ steps.check_type.outputs.release_tag }}
+  release_branch:
+    description: 'Release branch'
+    value: ${{ steps.check_type.outputs.release_branch }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up environment variables
+      shell: bash
+      run: |
+        echo "SPRINT_NUMBER=${{ inputs.sprint_number }}" >> $GITHUB_ENV
+        echo "SOURCE_BRANCH=${{ github.ref }}" >> $GITHUB_ENV
+        echo "RELEASE_BRANCH=release-${{ inputs.major }}.${{ inputs.sprint_number }}" >> $GITHUB_ENV
+        echo "MAJOR=${{ inputs.major }}" >> $GITHUB_ENV
+
+    - name: Determine release type
+      id: check_type
+      shell: bash
+      run: |
+        set -e
+        folder="."
+
+        # Get latest RC tag for sprint
+        rc_tag_match=$(git tag --list "${{ env.MAJOR }}.${{ env.SPRINT_NUMBER }}.*-rc" --sort=v:refname | tail -n1)
+
+        # Get latest production tag for sprint
+        if [ -n "$rc_tag_match" ]; then
+          prod_tag_match=$(git tag --list "${rc_tag_match%-rc}" --sort=v:refname | grep -v "rc" | tail -n1)
+        fi
+
+        # Check release branch status
+        latest_commit_in_release_branch=$(git rev-parse --verify "${{ env.RELEASE_BRANCH }}" 2>/dev/null || echo "")
+        tag_on_latest_commit_in_release_branch=$(git describe --tags --exact-match "$latest_commit_in_release_branch" 2>/dev/null || echo "")
+
+        # Determine release type and tag
+        if [ -n "$latest_commit_in_release_branch" ] && [ -z "$tag_on_latest_commit_in_release_branch" ]; then
+          echo "release_type=new_rc_release" >> $GITHUB_OUTPUT
+
+          if [ -z "$rc_tag_match" ]; then
+            echo "release_tag=${{ env.MAJOR }}.${{ env.SPRINT_NUMBER }}.0-rc" >> $GITHUB_OUTPUT
+          else
+            IFS='.' read -r major minor patch <<< "${rc_tag_match#v}"
+            patch=${patch%%-*}
+            new_patch=$((patch + 1))
+            echo "release_tag=${major}.${minor}.${new_patch}-rc" >> $GITHUB_OUTPUT
+          fi
+        elif [ -n "$tag_on_latest_commit_in_release_branch" ] && [ -z "$prod_tag_match" ]; then
+          echo "release_type=production_release" >> $GITHUB_OUTPUT
+          echo "release_tag=${tag_on_latest_commit_in_release_branch%-rc}" >> $GITHUB_OUTPUT
+        else
+          echo "release_type=no_new_code" >> $GITHUB_OUTPUT
+        fi
+
+        echo "release_branch=${{ env.RELEASE_BRANCH }}" >> $GITHUB_OUTPUT
+
+    - name: Create RC Release
+      if: steps.check_type.outputs.release_type == 'new_rc_release'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        gh release create ${{ steps.check_type.outputs.release_tag }} \
+          --target ${{ steps.check_type.outputs.release_branch }} \
+          -t "${{ steps.check_type.outputs.release_tag }}" \
+          -d -p --generate-notes
+
+    - name: Create Production Release
+      if: steps.check_type.outputs.release_type == 'production_release'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        gh release create ${{ steps.check_type.outputs.release_tag }} \
+          --target ${{ steps.check_type.outputs.release_branch }} \
+          -t "${{ steps.check_type.outputs.release_tag }}" \
+          -d --latest --generate-notes
+
+    - name: No New Code
+      if: steps.check_type.outputs.release_type == 'no_new_code'
+      shell: bash
+      run: |
+        echo "No new code to release"

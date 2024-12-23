@@ -9,8 +9,6 @@ permissions:
   deployments: write
   statuses: write
 
-  name: Reusable Release Workflow
-
 on:
   workflow_call:
     inputs:
@@ -118,6 +116,8 @@ jobs:
     needs: determine_state
     if: ${{ needs.determine_state.outputs.release_type == 'new_rc_release' }}
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Load env
         run: |
@@ -136,6 +136,8 @@ jobs:
     needs: determine_state
     if: ${{ needs.determine_state.outputs.release_type == 'production_release' }}
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Load env
         run: |
