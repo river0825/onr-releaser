@@ -9,17 +9,29 @@ permissions:
   deployments: write
   statuses: write
 
+  name: Reusable Release Workflow
+
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       sprint_number:
         description: Sprint number for this release
         required: true
-
+        type: string
       major:
         description: Major version number
-        required: true
+        type: string
         default: v2
+    outputs:
+      release_type:
+        description: Type of release determined (new_rc_release, production_release, or no_new_code)
+        value: ${{ jobs.determine_state.outputs.release_type }}
+      release_tag:
+        description: Generated release tag
+        value: ${{ jobs.determine_state.outputs.release_tag }}
+      release_branch:
+        description: Release branch
+        value: ${{ jobs.determine_state.outputs.release_branch }}
 jobs:
   determine_state:
     runs-on: ubuntu-latest
